@@ -3,6 +3,7 @@ require 'json'
 require 'rvg/rvg'
 require 'hpricot'
 require 'yaml'
+require 'mail'
 include Magick
 
 
@@ -35,6 +36,7 @@ private
   end
 
   def get_an_antonym word
+    p "Look for antonym for #{word}"
     url = "http://www.thesaurus.com/browse/#{word}?s=t"
 
     uri = URI.parse(url)
@@ -102,8 +104,7 @@ end
 
 base_path = config["squares"]
 
-SQUARE_PATH = "#{base_path}square.png"
-
+SQUARE_PATH = "#{base_path}square_#{Time.now.strftime("%Y%m%d%H")}.png"
 
 # Ok, so if there is already a square waiting for me to fill in, just die
 exit if File.exists?(SQUARE_PATH)
@@ -114,14 +115,27 @@ adjectives = []
 File.open(config["semes"], "r") do |f|
    adjectives = f.read.split("\n")
 end
+p "#{adjectives.length} words to chose from"
 
 # Create a square, generate the semes, and draw it out.
 square = SemioticSquare.new adjectives
 square.generate_semes
 draw_square square, SQUARE_PATH
 
-
 # And write the semes back out after all the semes that failed to have antonyms are removed
 File.open(config["semes"], "w") do |f|
    f << square.semes.join("\n")
 end
+
+# And email it to me
+Mail.defaults do
+  delivery_method :smtp, Hash[config["smtp"].map{|k,v| [k.to_sym, v]}]
+end
+
+Mail.deliver do
+   from 'avocadia@fastmail.fm'
+   to 'avocadia@fastmail.fm'
+   subject 'Another Semiotic Square'
+   body 'Enjoy'
+   add_file SQUARE_PATH
+ end
