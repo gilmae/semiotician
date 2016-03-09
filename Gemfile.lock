@@ -1,0 +1,19 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    hpricot (0.8.6)
+    mail (2.6.3)
+      mime-types (>= 1.16, < 3)
+    mime-types (2.99.1)
+    rmagick (2.15.4)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  hpricot
+  mail
+  rmagick
+
+BUNDLED WITH
+   1.10.5

@@ -1,5 +1,4 @@
 require 'net/http'
-require 'json'
 require 'rvg/rvg'
 require 'hpricot'
 require 'yaml'
