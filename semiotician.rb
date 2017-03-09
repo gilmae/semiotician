@@ -3,56 +3,49 @@ require 'rvg/rvg'
 require 'hpricot'
 require 'yaml'
 require 'mail'
+require 'twitter'
+require 'fileutils'
+
 include Magick
 
+def get_an_antonym word
+  p "Look for antonym for #{word}"
+  url = "http://www.thesaurus.com/browse/#{word}?s=t"
 
-# Infrastructure
-class SemioticSquare
-  attr_accessor :semes, :seme1, :seme2, :contradictory_seme1, :contradictory_seme2
+  uri = URI.parse(url)
 
-  def initialize semes
-     @semes = semes
-  end
+  result = Net::HTTP.start(uri.host, uri.port) { |http| http.read_timeout = 60; http.get(uri.path) }
 
-  def generate_semes
-    until @seme1
-      @seme1, @contradictory_seme1 = generate_seme_pair
-    end
+  return nil if result.code.to_i > 400
 
-    until @seme2
-      @seme2, @contradictory_seme2 = generate_seme_pair
-    end
-  end
-
-private
-  def generate_seme_pair
-    seme = @semes[rand() * @semes.length]
-
-    not_seme = get_an_antonym seme
-
-    @semes.delete(seme) unless not_seme
-    (return seme, not_seme) if not_seme
-  end
-
-  def get_an_antonym word
-    p "Look for antonym for #{word}"
-    url = "http://www.thesaurus.com/browse/#{word}?s=t"
-
-    uri = URI.parse(url)
-
-    result = Net::HTTP.start(uri.host, uri.port) { |http| http.read_timeout = 60; http.get(uri.path) }
-
-    return nil if result.code.to_i > 400
-
-    doc = Hpricot(result.body)
-    antonyms = doc.search("//section[@class='container-info antonyms']/div/ul/li/a/span/text()")
-
-    return (antonyms[rand() * antonyms.length]) if antonyms
-    nil
-  end
+  doc = Hpricot(result.body)
+  antonyms = doc.search("//section[@class='container-info antonyms']/div/ul/li/a/span/text()")
+  return (antonyms[rand() * antonyms.length]) if antonyms
+  nil
 end
 
-def draw_square square, path
+def generate_semes adjectives
+  seme = nil
+  contradictory_seme = nil
+  failed_semes = []
+  until contradictory_seme
+    seme = find_seme adjectives
+    contradictory_seme = get_an_antonym seme
+    (failed_semes << seme) unless contradictory_seme
+  end
+
+  return seme, contradictory_seme, failed_semes
+end
+
+
+def find_seme semes
+  index = rand() * semes.length
+  seme = semes[index]
+
+  return seme
+end
+
+def draw_square seme1,contradictory_seme1, seme2, contradictory_seme2, path
 
   rvg = RVG.new(7.in, 7.in).viewbox(0,0,500,400) do |canvas|
     canvas.background_fill = 'white'
@@ -72,10 +65,10 @@ def draw_square square, path
     canvas.polygon(120,110, 125,100, 130,110).styles(:stroke_width=>1, :stroke=>'black')
     canvas.polygon(345,110, 350,100, 355,110).styles(:stroke_width=>1, :stroke=>'black')
 
-    canvas.text(60, 75, square.seme1).styles(:font_size=>14, :font_family=>'helvetica', :fill=>'black')
-    canvas.text(360, 75, square.seme2).styles(:font_size=>14, :font_family=>'helvetica', :fill=>'black')
-    canvas.text(60, 325, square.contradictory_seme2).styles(:font_size=>14, :font_family=>'helvetica', :fill=>'black')
-    canvas.text(360, 325, square.contradictory_seme1).styles(:font_size=>14, :font_family=>'helvetica', :fill=>'black')
+    canvas.text(60, 75, seme1).styles(:font_size=>14, :fill=>'black')
+    canvas.text(360, 75, seme2).styles(:font_size=>14, :fill=>'black')
+    canvas.text(60, 325, contradictory_seme2).styles(:font_size=>14, :fill=>'black')
+    canvas.text(360, 325, contradictory_seme1).styles(:font_size=>14, :fill=>'black')
   end
 
   rvg.draw.write(path)
@@ -103,10 +96,10 @@ end
 
 base_path = config["squares"]
 
-SQUARE_PATH = "#{base_path}square_#{Time.now.strftime("%Y%m%d%H")}.png"
+square_path = "#{base_path}square_#{Time.now.strftime("%Y%m%d%H")}.png"
 
 # Ok, so if there is already a square waiting for me to fill in, just die
-exit if File.exists?(SQUARE_PATH)
+#exit if File.exists?(SQUARE_PATH)
 
 # Still here? Ok, load our adjectives
 
@@ -117,24 +110,41 @@ end
 p "#{adjectives.length} words to chose from"
 
 # Create a square, generate the semes, and draw it out.
-square = SemioticSquare.new adjectives
-square.generate_semes
-draw_square square, SQUARE_PATH
+seme, not_seme, failed_semes = generate_semes adjectives
+seme2, not_seme2, failed_semes = generate_semes adjectives
+
+draw_square seme, not_seme, seme2, not_seme2, square_path
 
 # And write the semes back out after all the semes that failed to have antonyms are removed
 File.open(config["semes"], "w") do |f|
-   f << square.semes.join("\n")
+   f << adjectives.join("\n")
 end
 
-# And email it to me
-Mail.defaults do
-  delivery_method :smtp, Hash[config["smtp"].map{|k,v| [k.to_sym, v]}]
+if config["twitter"]
+  client = Twitter::REST::Client.new do |twitter|
+    twitter.consumer_key = config["twitter"]["CONSUMER_KEY"]
+    twitter.consumer_secret = config["twitter"]["CONSUMER_SECRET"]
+    twitter.access_token = config["twitter"]["OAUTH_TOKEN"]
+    twitter.access_token_secret = config["twitter"]["OAUTH_TOKEN_SECRET"]
+  end
+
+  File.open(square_path, "r") do |file|
+    client.update_with_media("", file)
+  end
 end
 
-Mail.deliver do
-   from 'avocadia@fastmail.fm'
-   to 'avocadia@fastmail.fm'
-   subject 'Another Semiotic Square'
-   body 'Enjoy'
-   add_file SQUARE_PATH
- end
+if config["smtp"]
+  Mail.defaults do
+    delivery_method :smtp, Hash[config["smtp"].map{|k,v| [k.to_sym, v]}]
+  end
+
+  Mail.deliver do
+    from 'avocadia@fastmail.fm'
+    to 'avocadia@fastmail.fm'
+    subject 'Another Semiotic Square'
+    body 'Enjoy'
+    add_file square_path
+  end
+end
+
+FileUtils.rm(square_path)
