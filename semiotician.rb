@@ -1,48 +1,45 @@
-require 'net/http'
 require 'rvg/rvg'
-require 'hpricot'
 require 'yaml'
 require 'mail'
 require 'twitter'
 require 'fileutils'
+require './thesaurusDotCom'
 
 include Magick
 
+
+
+include ThesaurusDotCom
+
 def get_an_antonym word
   p "Look for antonym for #{word}"
-  url = "http://www.thesaurus.com/browse/#{word}?s=t"
 
-  uri = URI.parse(url)
+  antonyms = ThesaurusDotCom::get_antonyms word
 
-  result = Net::HTTP.start(uri.host, uri.port) { |http| http.read_timeout = 60; http.get(uri.path) }
+  if antonyms
 
-  return nil if result.code.to_i > 400
+    antonym = antonyms[rand() * antonyms.length]
 
-  doc = Hpricot(result.body)
-  antonyms = doc.search("//section[@class='container-info antonyms']/div/ul/li/a/span/text()")
-  return (antonyms[rand() * antonyms.length]) if antonyms
+    return antonym, antonyms
+  end
   nil
 end
 
 def generate_semes adjectives
   seme = nil
   contradictory_seme = nil
-  failed_semes = []
+  failed_words = []
+
   until contradictory_seme
-    seme = find_seme adjectives
-    contradictory_seme = get_an_antonym seme
-    (failed_semes << seme) unless contradictory_seme
+    index = rand() * adjectives.length
+    seme = adjectives[index]
+
+    contradictory_seme, new_words = get_an_antonym seme
+
+    (failed_words << seme) unless contradictory_seme
   end
 
-  return seme, contradictory_seme, failed_semes
-end
-
-
-def find_seme semes
-  index = rand() * semes.length
-  seme = semes[index]
-
-  return seme
+  return seme, contradictory_seme, new_words, failed_words
 end
 
 def draw_square seme1,contradictory_seme1, seme2, contradictory_seme2, path
@@ -109,13 +106,24 @@ File.open(config["semes"], "r") do |f|
 end
 p "#{adjectives.length} words to chose from"
 
+words_to_add = []
+words_to_remove = []
+
 # Create a square, generate the semes, and draw it out.
-seme, not_seme, failed_semes = generate_semes adjectives
-seme2, not_seme2, failed_semes = generate_semes adjectives
+seme, not_seme, new_words, failed_words = generate_semes adjectives
+words_to_add += new_words if new_words
+words_to_remove += failed_words if failed_words
+
+seme2, not_seme2, new_words, failed_words = generate_semes adjectives
+words_to_add += new_words if new_words
+words_to_remove += failed_words if failed_words
 
 draw_square seme, not_seme, seme2, not_seme2, square_path
 
-# And write the semes back out after all the semes that failed to have antonyms are removed
+adjectives += new_words
+adjectives -= failed_words
+
+# # And write the semes back out after all the semes that failed to have antonyms are removed
 File.open(config["semes"], "w") do |f|
    f << adjectives.join("\n")
 end
