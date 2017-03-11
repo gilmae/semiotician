@@ -3,7 +3,7 @@ require 'yaml'
 require 'mail'
 require 'twitter'
 require 'fileutils'
-require './thesaurusDotCom'
+require File.join(File.dirname(__FILE__), 'thesaurusDotCom')
 
 include Magick
 
